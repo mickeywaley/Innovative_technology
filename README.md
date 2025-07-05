@@ -10,6 +10,12 @@ admin
 
 amdin123
 
+----
+
+界面
+
+<img src="https://raw.githubusercontent.com/mickeywaley/Innovative_technology/refs/heads/main/01.png"  />
+
 
 -------------
 # 尚显创新积分统计系统功能介绍
