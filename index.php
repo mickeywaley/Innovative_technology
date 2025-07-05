@@ -1,396 +1,253 @@
 <?php
-// 创新积分统计系统 - 单文件精简版
+/**
+ * 尚显创新积分统计系统 - 单文件精简版
+ * 文件: index.php
+ */
 
-// 数据文件
-$dataFile = 'innovation_data.txt';
-$userFile = 'users.txt';
-$departments = ['售前部', '售后部', '店长运营部', '生产部'];
+// 配置信息
+define('ADMIN_USERNAME', 'admin');
+define('ADMIN_PASSWORD', 'admin123');
+define('DATA_FILE', 'innovation_data.txt');
+define('USERS_FILE', 'users.txt');
+define('DEPARTMENTS', ['售前部', '售后部', '店长运营部', '生产部']);
 
-// 初始化用户会话
+// 初始化会话
 session_start();
 
-// 用户权限常量
-define('ROLE_ADMIN', 'admin');
-define('ROLE_USER', 'user');
-
-// 加载数据
+// 工具函数
 function loadData($file) {
-    if (file_exists($file)) {
-        $content = file_get_contents($file);
-        return json_decode($content, true) ?: [];
-    }
-    return [];
+    return file_exists($file) ? json_decode(file_get_contents($file), true) : [];
 }
 
-// 保存数据
 function saveData($file, $data) {
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
 }
 
-// 检查用户是否登录
-function isLoggedIn() {
-    return isset($_SESSION['user']);
-}
-
-// 检查用户是否为管理员
 function isAdmin() {
-    return isLoggedIn() && $_SESSION['user']['role'] === ROLE_ADMIN;
+    return isset($_SESSION['admin']) && $_SESSION['admin'] === true;
 }
 
-// 登录处理
-if (isset($_POST['action']) && $_POST['action'] == 'login') {
-    $users = loadData($userFile);
-    $username = $_POST['username'];
-    $password = $_POST['password'];
-    
-    foreach ($users as $user) {
-        if ($user['username'] === $username && password_verify($password, $user['password'])) {
-            $_SESSION['user'] = $user;
-            header('Location: index.php');
-            exit;
-        }
+function authenticate($username, $password) {
+    return $username === ADMIN_USERNAME && $password === ADMIN_PASSWORD;
+}
+
+// 处理登录
+if (isset($_POST['login'])) {
+    if (authenticate($_POST['username'], $_POST['password'])) {
+        $_SESSION['admin'] = true;
+        header('Location: index.php');
+        exit;
+    } else {
+        $loginError = '用户名或密码错误';
     }
-    
-    $loginError = '用户名或密码错误';
 }
 
-// 注销处理
-if (isset($_GET['action']) && $_GET['action'] == 'logout') {
+// 处理注销
+if (isset($_GET['logout'])) {
     session_destroy();
     header('Location: index.php');
     exit;
 }
 
-// 添加用户（仅限管理员）
-if (isset($_POST['action']) && $_POST['action'] == 'addUser' && isAdmin()) {
-    $users = loadData($userFile);
-    $username = $_POST['username'];
-    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $role = $_POST['role'];
-    
-    // 检查用户名是否已存在
-    foreach ($users as $user) {
-        if ($user['username'] === $username) {
-            $addUserError = '用户名已存在';
-            break;
-        }
-    }
-    
-    if (!isset($addUserError)) {
-        $newUser = [
-            'username' => $username,
-            'password' => $password,
-            'role' => $role
+// 加载数据
+$data = loadData(DATA_FILE);
+$users = loadData(USERS_FILE);
+
+// 获取所有已输入过的姓名
+$allNames = array_unique(array_column($data, 'name'));
+
+// 处理数据操作
+if (isAdmin()) {
+    // 添加记录
+    if (isset($_POST['add'])) {
+        $newRecord = [
+            'id' => uniqid(),
+            'date' => $_POST['date'],
+            'department' => $_POST['department'],
+            'name' => $_POST['name'],
+            'content' => $_POST['content'],
+            'quantity' => (int)$_POST['quantity'],
+            'points' => (int)$_POST['points'],
+            'implemented' => isset($_POST['implemented']) ? true : false,
+            'is_additional' => isset($_POST['is_additional']) ? true : false,
+            'month_for_points' => $_POST['month_for_points'] ?? date('Y-m', strtotime($_POST['date']))
         ];
         
-        $users[] = $newUser;
-        saveData($userFile, $users);
-        header('Location: index.php?action=manageUsers');
+        $data[] = $newRecord;
+        saveData(DATA_FILE, $data);
+        header('Location: index.php');
         exit;
     }
-}
-
-// 删除用户（仅限管理员）
-if (isset($_GET['action']) && $_GET['action'] == 'deleteUser' && isAdmin()) {
-    $users = loadData($userFile);
-    $username = $_GET['username'];
     
-    // 不能删除自己
-    if ($username === $_SESSION['user']['username']) {
-        $deleteUserError = '不能删除自己';
-    } else {
-        $users = array_filter($users, function($user) use ($username) {
-            return $user['username'] !== $username;
-        });
-        
-        saveData($userFile, $users);
-        header('Location: index.php?action=manageUsers');
-        exit;
-    }
-}
-
-// 添加记录（仅限管理员）
-if (isset($_POST['action']) && $_POST['action'] == 'add' && isAdmin()) {
-    $data = loadData($dataFile);
-    
-    $record = [
-        'id' => uniqid(),
-        'date' => date('Y-m-d'),
-        'department' => $_POST['department'],
-        'name' => $_POST['name'],
-        'content' => $_POST['content'],
-        'quantity' => (int)$_POST['quantity'],
-        'points' => (int)$_POST['points'],
-        'implemented' => isset($_POST['implemented'])
-    ];
-    
-    $data[] = $record;
-    saveData($dataFile, $data);
-    
-    header('Location: index.php');
-    exit;
-}
-
-// 更新记录（仅限管理员）
-if (isset($_POST['action']) && $_POST['action'] == 'update' && isAdmin()) {
-    $data = loadData($dataFile);
-    
-    foreach ($data as &$record) {
-        if ($record['id'] == $_POST['id']) {
-            $record['department'] = $_POST['department'];
-            $record['name'] = $_POST['name'];
-            $record['content'] = $_POST['content'];
-            $record['quantity'] = (int)$_POST['quantity'];
-            $record['points'] = (int)$_POST['points'];
-            $record['implemented'] = isset($_POST['implemented']);
-            break;
+    // 编辑记录
+    if (isset($_POST['edit'])) {
+        foreach ($data as &$record) {
+            if ($record['id'] === $_POST['id']) {
+                $record['date'] = $_POST['date'];
+                $record['department'] = $_POST['department'];
+                $record['name'] = $_POST['name'];
+                $record['content'] = $_POST['content'];
+                $record['quantity'] = (int)$_POST['quantity'];
+                $record['points'] = (int)$_POST['points'];
+                $record['implemented'] = isset($_POST['implemented']) ? true : false;
+                $record['is_additional'] = isset($_POST['is_additional']) ? true : false;
+                $record['month_for_points'] = $_POST['month_for_points'];
+                break;
+            }
         }
+        saveData(DATA_FILE, $data);
+        header('Location: index.php');
+        exit;
     }
     
-    saveData($dataFile, $data);
-    
-    header('Location: index.php');
-    exit;
+    // 删除记录
+    if (isset($_GET['delete'])) {
+        $data = array_filter($data, function($record) {
+            return $record['id'] !== $_GET['delete'];
+        });
+        saveData(DATA_FILE, $data);
+        header('Location: index.php');
+        exit;
+    }
 }
-
-// 删除记录（仅限管理员）
-if (isset($_GET['action']) && $_GET['action'] == 'delete' && isAdmin()) {
-    $data = loadData($dataFile);
-    
-    $data = array_filter($data, function($record) {
-        return $record['id'] != $_GET['id'];
-    });
-    
-    saveData($dataFile, $data);
-    
-    header('Location: index.php');
-    exit;
-}
-
-// 获取数据
-$data = loadData($dataFile);
-
-// 获取所有唯一姓名
-$uniqueNames = [];
-foreach ($data as $record) {
-    $uniqueNames[$record['name']] = true;
-}
-$uniqueNames = array_keys($uniqueNames);
 
 // 统计函数
-function getWeeklyStats($data) {
-    $weeks = [];
-    foreach ($data as $record) {
-        $weekNum = date('W', strtotime($record['date']));
-        $year = date('Y', strtotime($record['date']));
-        $key = "$year-W$weekNum";
-        
-        if (!isset($weeks[$key])) {
-            $weeks[$key] = [
-                'records' => 0,
-                'quantity' => 0,
-                'points' => 0,
-                'implemented' => 0
-            ];
-        }
-        
-        $weeks[$key]['records']++;
-        $weeks[$key]['quantity'] += $record['quantity'];
-        $weeks[$key]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $weeks[$key]['implemented']++;
-        }
+function getPeriodData($data, $period, $forPoints = false) {
+    $today = new DateTime();
+    $startDate = null;
+    $endDate = $today->format('Y-m-d');
+    
+    switch ($period) {
+        case 'week':
+            $startDate = (clone $today)->modify('monday this week')->format('Y-m-d');
+            break;
+        case 'month':
+            $startDate = (clone $today)->modify('first day of this month')->format('Y-m-d');
+            break;
+        case 'quarter':
+            $month = $today->format('n');
+            $quarterStartMonth = ((int)($month - 1) / 3) * 3 + 1;
+            $startDate = (new DateTime($today->format('Y') . '-' . $quarterStartMonth . '-01'))->format('Y-m-d');
+            break;
+        default:
+            return $data;
     }
-    return $weeks;
+    
+    return array_filter($data, function($record) use ($startDate, $endDate, $period, $forPoints) {
+        if ($forPoints && $record['is_additional']) {
+            // 追加积分的记录，使用month_for_points字段
+            $recordMonth = date('Y-m', strtotime($record['date']));
+            $targetMonth = date('Y-m', strtotime($startDate));
+            return $recordMonth >= $targetMonth;
+        } else {
+            // 普通记录使用日期范围
+            return $record['date'] >= $startDate && $record['date'] <= $endDate;
+        }
+    });
 }
 
-function getMonthlyStats($data) {
-    $months = [];
-    foreach ($data as $record) {
-        $month = date('Y-m', strtotime($record['date']));
+function getPersonRanking($data, $period) {
+    $periodData = getPeriodData($data, $period, true);
+    $ranking = [];
+    
+    foreach ($periodData as $record) {
+        $key = $record['department'] . '-' . $record['name'];
         
-        if (!isset($months[$month])) {
-            $months[$month] = [
-                'records' => 0,
-                'quantity' => 0,
-                'points' => 0,
-                'implemented' => 0
-            ];
-        }
-        
-        $months[$month]['records']++;
-        $months[$month]['quantity'] += $record['quantity'];
-        $months[$month]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $months[$month]['implemented']++;
-        }
-    }
-    return $months;
-}
-
-function getQuarterlyStats($data) {
-    $quarters = [];
-    foreach ($data as $record) {
-        $year = date('Y', strtotime($record['date']));
-        $month = (int)date('n', strtotime($record['date']));
-        $quarter = ceil($month / 3);
-        $key = "$year-Q$quarter";
-        
-        if (!isset($quarters[$key])) {
-            $quarters[$key] = [
-                'records' => 0,
-                'quantity' => 0,
-                'points' => 0,
-                'implemented' => 0
-            ];
-        }
-        
-        $quarters[$key]['records']++;
-        $quarters[$key]['quantity'] += $record['quantity'];
-        $quarters[$key]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $quarters[$key]['implemented']++;
-        }
-    }
-    return $quarters;
-}
-
-function getYearlyStats($data) {
-    $years = [];
-    foreach ($data as $record) {
-        $year = date('Y', strtotime($record['date']));
-        
-        if (!isset($years[$year])) {
-            $years[$year] = [
-                'records' => 0,
-                'quantity' => 0,
-                'points' => 0,
-                'implemented' => 0
-            ];
-        }
-        
-        $years[$year]['records']++;
-        $years[$year]['quantity'] += $record['quantity'];
-        $years[$year]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $years[$year]['implemented']++;
-        }
-    }
-    return $years;
-}
-
-function getDepartmentStats($data) {
-    $departments = [];
-    foreach ($data as $record) {
-        $dept = $record['department'];
-        
-        if (!isset($departments[$dept])) {
-            $departments[$dept] = [
-                'records' => 0,
-                'quantity' => 0,
-                'points' => 0,
-                'implemented' => 0
-            ];
-        }
-        
-        $departments[$dept]['records']++;
-        $departments[$dept]['quantity'] += $record['quantity'];
-        $departments[$dept]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $departments[$dept]['implemented']++;
-        }
-    }
-    return $departments;
-}
-
-function getPersonStats($data) {
-    $persons = [];
-    foreach ($data as $record) {
-        $key = "{$record['department']}-{$record['name']}";
-        
-        if (!isset($persons[$key])) {
-            $persons[$key] = [
+        if (!isset($ranking[$key])) {
+            $ranking[$key] = [
                 'department' => $record['department'],
                 'name' => $record['name'],
-                'records' => 0,
-                'quantity' => 0,
                 'points' => 0,
+                'quantity' => 0,
                 'implemented' => 0
             ];
         }
         
-        $persons[$key]['records']++;
-        $persons[$key]['quantity'] += $record['quantity'];
-        $persons[$key]['points'] += $record['points'];
-        if ($record['implemented']) {
-            $persons[$key]['implemented']++;
+        $ranking[$key]['points'] += $record['points'];
+        if (!$record['is_additional']) {
+            $ranking[$key]['quantity'] += $record['quantity'];
         }
+        $ranking[$key]['implemented'] += $record['implemented'] ? 1 : 0;
     }
-    return $persons;
+    
+    usort($ranking, function($a, $b) {
+        return $b['points'] - $a['points'];
+    });
+    
+    return $ranking;
 }
 
-// 获取当前周和月的开始和结束日期
-$currentDate = new DateTime();
-$currentWeekStart = clone $currentDate;
-$currentWeekStart->modify('Monday this week');
-$currentWeekEnd = clone $currentWeekStart;
-$currentWeekEnd->modify('+6 days');
+function getDepartmentRanking($data, $period) {
+    $periodData = getPeriodData($data, $period, true);
+    $ranking = [];
+    
+    foreach ($periodData as $record) {
+        $department = $record['department'];
+        
+        if (!isset($ranking[$department])) {
+            $ranking[$department] = [
+                'department' => $department,
+                'points' => 0,
+                'quantity' => 0,
+                'implemented' => 0
+            ];
+        }
+        
+        $ranking[$department]['points'] += $record['points'];
+        if (!$record['is_additional']) {
+            $ranking[$department]['quantity'] += $record['quantity'];
+        }
+        $ranking[$department]['implemented'] += $record['implemented'] ? 1 : 0;
+    }
+    
+    usort($ranking, function($a, $b) {
+        return $b['points'] - $a['points'];
+    });
+    
+    return $ranking;
+}
 
-$currentMonthStart = clone $currentDate;
-$currentMonthStart->modify('first day of this month');
-$currentMonthEnd = clone $currentDate;
-$currentMonthEnd->modify('last day of this month');
+function getCompanyRanking($data, $period) {
+    $periodData = getPeriodData($data, $period, true);
+    $ranking = [
+        'points' => 0,
+        'quantity' => 0,
+        'implemented' => 0
+    ];
+    
+    foreach ($periodData as $record) {
+        $ranking['points'] += $record['points'];
+        if (!$record['is_additional']) {
+            $ranking['quantity'] += $record['quantity'];
+        }
+        $ranking['implemented'] += $record['implemented'] ? 1 : 0;
+    }
+    
+    return $ranking;
+}
 
-// 获取当前周和月的数据
-$currentWeekData = array_filter($data, function($record) use ($currentWeekStart, $currentWeekEnd) {
-    $recordDate = new DateTime($record['date']);
-    return $recordDate >= $currentWeekStart && $recordDate <= $currentWeekEnd;
-});
+// 获取当前视图
+$view = isset($_GET['view']) ? $_GET['view'] : 'list';
+$period = isset($_GET['period']) ? $_GET['period'] : 'week';
+$editId = isset($_GET['edit']) ? $_GET['edit'] : null;
 
-$currentMonthData = array_filter($data, function($record) use ($currentMonthStart, $currentMonthEnd) {
-    $recordDate = new DateTime($record['date']);
-    return $recordDate >= $currentMonthStart && $recordDate <= $currentMonthEnd;
-});
-
-// 计算当前周和月的排行
-$currentWeekRanking = getPersonStats($currentWeekData);
-$currentMonthRanking = getPersonStats($currentMonthData);
-
-// 按积分排序
-usort($currentWeekRanking, function($a, $b) {
-    return $b['points'] - $a['points'];
-});
-
-usort($currentMonthRanking, function($a, $b) {
-    return $b['points'] - $a['points'];
-});
-
-// 获取当前查看的统计类型
-$view = isset($_GET['view']) ? $_GET['view'] : 'all';
-
-// 获取要编辑的记录
+// 获取编辑记录
 $editRecord = null;
-if (isset($_GET['action']) && $_GET['action'] == 'edit' && isAdmin()) {
+if ($editId) {
     foreach ($data as $record) {
-        if ($record['id'] == $_GET['id']) {
+        if ($record['id'] === $editId) {
             $editRecord = $record;
             break;
         }
     }
 }
 
-// 检查是否需要初始化用户
-$users = loadData($userFile);
-if (empty($users)) {
-    // 创建默认管理员账户
-    $defaultAdmin = [
-        'username' => 'admin',
-        'password' => password_hash('admin123', PASSWORD_DEFAULT),
-        'role' => ROLE_ADMIN
-    ];
-    
-    $users[] = $defaultAdmin;
-    saveData($userFile, $users);
+// 生成月份选择列表
+$monthOptions = [];
+$currentMonth = date('Y-m');
+for ($i = 0; $i < 12; $i++) {
+    $month = date('Y-m', strtotime("-$i months"));
+    $monthOptions[] = $month;
 }
 ?>
 
@@ -399,721 +256,424 @@ if (empty($users)) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>创新积分统计系统</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3B82F6',
-                        secondary: '#64748B',
-                        success: '#10B981',
-                        warning: '#F59E0B',
-                        danger: '#EF4444',
-                        info: '#06B6D4',
-                        light: '#F8FAFC',
-                        dark: '#1E293B'
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'system-ui', 'sans-serif'],
-                    },
-                }
-            }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
-            }
-            .transition-height {
-                transition-property: height;
-                transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-                transition-duration: 300ms;
-            }
-            .card-shadow {
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            }
-        }
+    <title>尚显创新积分统计系统</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 0; padding: 0; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 15px; }
+        .header { background-color: #333; color: white; padding: 15px 0; }
+        .header h1 { margin: 0; }
+        .nav { display: flex; justify-content: space-between; align-items: center; }
+        .nav ul { list-style: none; margin: 0; padding: 0; display: flex; }
+        .nav ul li { margin-right: 20px; }
+        .nav ul li a { color: white; text-decoration: none; }
+        .content { padding: 30px 0; }
+        .card { background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
+        .card-header { margin-bottom: 15px; }
+        .card-header h2 { margin: 0; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background-color: #007BFF; color: white; }
+        .btn-danger { background-color: #DC3545; color: white; }
+        .btn-secondary { background-color: #6C757D; color: white; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        .table th { background-color: #f2f2f2; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .tabs { margin-bottom: 20px; }
+        .tabs ul { list-style: none; margin: 0; padding: 0; display: flex; }
+        .tabs ul li { margin-right: 10px; }
+        .tabs ul li a { display: block; padding: 8px 15px; background-color: #f2f2f2; border-radius: 4px 4px 0 0; text-decoration: none; color: #333; }
+        .tabs ul li a.active { background-color: #007BFF; color: white; }
+        .period-tabs { margin-bottom: 15px; }
+        .period-tabs a { margin-right: 10px; }
+        .period-tabs a.active { font-weight: bold; color: #007BFF; }
+        .implemented-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .implemented-yes { background-color: #d4edda; color: #155724; }
+        .implemented-no { background-color: #f8d7da; color: #721c24; }
+        .ranking-badge { display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; font-weight: bold; }
+        .ranking-1 { background-color: #ffc107; color: #333; }
+        .ranking-2 { background-color: #6c757d; color: white; }
+        .ranking-3 { background-color: #fd7e14; color: white; }
+        .additional-field { display: none; }
+        .additional-badge { background-color: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen font-sans">
-    <header class="bg-primary text-white shadow-lg">
-        <div class="container mx-auto px-4 py-6">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                <div>
-                    <h1 class="text-[clamp(1.8rem,3vw,2.5rem)] font-bold flex items-center">
-                        <i class="fa fa-line-chart mr-3"></i>
-                        创新积分统计系统
-                    </h1>
-                    <p class="mt-2 text-blue-100">高效跟踪和分析团队创新成果</p>
-                </div>
-                <div class="mt-4 md:mt-0">
-                    <?php if (isLoggedIn()): ?>
-                        <div class="flex items-center">
-                            <span class="mr-3 font-medium">欢迎，<?php echo $_SESSION['user']['username']; ?> (<?php echo $_SESSION['user']['role'] === ROLE_ADMIN ? '管理员' : '普通用户'; ?>)</span>
-                            <a href="?action=logout" class="py-2 px-4 bg-white text-primary rounded-lg hover:bg-gray-100 transition text-sm">
-                                <i class="fa fa-sign-out mr-1"></i> 退出
-                            </a>
-                            <?php if (isAdmin()): ?>
-                                <a href="?action=manageUsers" class="ml-2 py-2 px-4 bg-warning text-white rounded-lg hover:bg-warning/90 transition text-sm">
-                                    <i class="fa fa-users mr-1"></i> 管理用户
-                                </a>
-                            <?php endif; ?>
-                        </div>
-                    <?php else: ?>
-                        <a href="?action=login" class="py-2 px-4 bg-white text-primary rounded-lg hover:bg-gray-100 transition text-sm">
-                            <i class="fa fa-sign-in mr-1"></i> 登录
-                        </a>
-                    <?php endif; ?>
-                </div>
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="nav">
+                <h1>尚显创新积分统计系统</h1>
+                <?php if (isAdmin()): ?>
+                <ul>
+                    <li><a href="?logout">退出登录</a></li>
+                </ul>
+                <?php endif; ?>
             </div>
         </div>
-    </header>
+    </div>
 
-    <main class="container mx-auto px-4 py-8">
-        <!-- 登录表单 -->
-        <?php if (isset($_GET['action']) && $_GET['action'] == 'login' && !isLoggedIn()): ?>
-            <div class="max-w-md mx-auto bg-white rounded-xl p-6 shadow-lg">
-                <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                    <i class="fa fa-sign-in mr-2 text-primary"></i>
-                    登录系统
-                </h2>
-                <form action="index.php" method="post" class="space-y-4">
-                    <input type="hidden" name="action" value="login">
-                    <div>
-                        <label for="username" class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-                        <input type="text" id="username" name="username" required
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
+    <div class="content">
+        <div class="container">
+            <?php if (!isAdmin()): ?>
+            <!-- 登录表单 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>管理员登录</h2>
+                </div>
+                <form method="post">
+                    <input type="hidden" name="login" value="1">
+                    <div class="form-group">
+                        <label for="username">用户名</label>
+                        <input type="text" id="username" name="username" required>
                     </div>
-                    <div>
-                        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                        <input type="password" id="password" name="password" required
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
+                    <div class="form-group">
+                        <label for="password">密码</label>
+                        <input type="password" id="password" name="password" required>
                     </div>
                     <?php if (isset($loginError)): ?>
-                        <div class="text-danger text-sm"><?php echo $loginError; ?></div>
+                    <div class="alert alert-danger"><?php echo $loginError; ?></div>
                     <?php endif; ?>
-                    <div class="flex justify-end">
-                        <button type="submit" class="py-2 px-4 bg-primary text-white rounded-lg hover:bg-primary/90 transition">
-                            <i class="fa fa-check mr-1"></i> 登录
-                        </button>
-                    </div>
+                    <button type="submit" class="btn btn-primary">登录</button>
                 </form>
-                <p class="mt-4 text-sm text-gray-500">
-                    默认管理员账户：admin / admin123
-                </p>
             </div>
-        <?php elseif (isset($_GET['action']) && $_GET['action'] == 'manageUsers' && isAdmin()): ?>
-            <!-- 用户管理页面 -->
-            <div class="bg-white rounded-xl p-6 shadow-lg">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-bold text-gray-800 flex items-center">
-                        <i class="fa fa-users mr-2 text-warning"></i>
-                        用户管理
-                    </h2>
-                    <button id="showAddUserFormBtn" class="py-2 px-4 bg-success text-white rounded-lg hover:bg-success/90 transition text-sm">
-                        <i class="fa fa-plus-circle mr-1"></i> 添加用户
-                    </button>
+            <?php else: ?>
+            <!-- 管理界面 -->
+            <div class="tabs">
+                <ul>
+                    <li><a href="?view=list" class="<?php echo $view == 'list' ? 'active' : ''; ?>">数据列表</a></li>
+                    <li><a href="?view=person" class="<?php echo $view == 'person' ? 'active' : ''; ?>">个人排行</a></li>
+                    <li><a href="?view=department" class="<?php echo $view == 'department' ? 'active' : ''; ?>">部门排行</a></li>
+                    <li><a href="?view=company" class="<?php echo $view == 'company' ? 'active' : ''; ?>">公司统计</a></li>
+                </ul>
+            </div>
+
+            <?php if ($view == 'list'): ?>
+            <!-- 数据列表视图 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="flex justify-between items-center">
+                        <h2>创新积分记录</h2>
+                        <button id="showAddFormBtn" class="btn btn-primary">添加记录</button>
+                    </div>
                 </div>
                 
-                <!-- 添加用户表单 -->
-                <div id="addUserForm" class="mb-6 hidden">
-                    <h3 class="text-lg font-semibold mb-3 text-gray-700">添加用户</h3>
-                    <form action="index.php" method="post" class="space-y-4">
-                        <input type="hidden" name="action" value="addUser">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label for="username" class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-                                <input type="text" id="username" name="username" required
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
+                <!-- 添加记录表单 -->
+                <div id="addRecordForm" class="mb-4" style="display: none;">
+                    <form method="post">
+                        <input type="hidden" name="add" value="1">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="date">日期</label>
+                                <input type="date" id="date" name="date" required value="<?php echo date('Y-m-d'); ?>">
                             </div>
-                            <div>
-                                <label for="password" class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                                <input type="password" id="password" name="password" required
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
+                            <div class="form-group">
+                                <label for="department">部门</label>
+                                <select id="department" name="department" required>
+                                    <?php foreach (DEPARTMENTS as $dept): ?>
+                                    <option value="<?php echo $dept; ?>"><?php echo $dept; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="name">姓名</label>
+                                <input type="text" id="name" name="name" required list="namesList">
+                                <datalist id="namesList">
+                                    <?php foreach ($allNames as $name): ?>
+                                    <option value="<?php echo $name; ?>"><?php echo $name; ?></option>
+                                    <?php endforeach; ?>
+                                </datalist>
+                            </div>
+                            <div class="form-group">
+                                <label for="quantity">创新数量</label>
+                                <input type="number" id="quantity" name="quantity" required min="1" value="1">
                             </div>
                         </div>
-                        <div>
-                            <label for="role" class="block text-sm font-medium text-gray-700 mb-1">角色</label>
-                            <select id="role" name="role" required
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                <option value="">请选择角色</option>
-                                <option value="admin">管理员</option>
-                                <option value="user">普通用户</option>
-                            </select>
+                        <div class="form-group">
+                            <label for="content">创新内容</label>
+                            <textarea id="content" name="content" required></textarea>
                         </div>
-                        <?php if (isset($addUserError)): ?>
-                            <div class="text-danger text-sm"><?php echo $addUserError; ?></div>
-                        <?php endif; ?>
-                        <div class="flex justify-end space-x-3">
-                            <button type="button" id="cancelAddUserBtn" class="py-2 px-4 border border-gray-300 rounded-lg hover:bg-gray-100 transition">
-                                取消
-                            </button>
-                            <button type="submit" class="py-2 px-4 bg-success text-white rounded-lg hover:bg-success/90 transition">
-                                <i class="fa fa-save mr-1"></i> 添加用户
-                            </button>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="points">创新积分</label>
+                                <input type="number" id="points" name="points" required min="1" value="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="implemented">是否落地实施</label>
+                                <input type="checkbox" id="implemented" name="implemented" value="1">
+                            </div>
                         </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="isAdditional" name="is_additional" value="1">
+                                本月或之后追加积分（不计入创新数量）
+                            </label>
+                        </div>
+                        <div id="additionalPointsFields" class="additional-field grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="month_for_points">积分计入月份</label>
+                                <select id="month_for_points" name="month_for_points" required>
+                                    <?php foreach ($monthOptions as $month): ?>
+                                    <option value="<?php echo $month; ?>" <?php echo $month == date('Y-m') ? 'selected' : ''; ?>><?php echo $month; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">保存</button>
                     </form>
                 </div>
                 
-                <!-- 用户列表 -->
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">用户名</th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色</th>
-                                <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            <?php
-                            $users = loadData($userFile);
-                            foreach ($users as $user):
-                            ?>
-                            <tr class="hover:bg-gray-50 transition">
-                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $user['username']; ?></td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === ROLE_ADMIN ? 'bg-warning text-white' : 'bg-info text-white'; ?>">
-                                        <?php echo $user['role'] === ROLE_ADMIN ? '管理员' : '普通用户'; ?>
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                    <?php if ($user['username'] !== $_SESSION['user']['username']): ?>
-                                        <a href="?action=deleteUser&username=<?php echo $user['username']; ?>" class="text-danger hover:text-danger/80" onclick="return confirm('确定要删除此用户吗？')">
-                                            <i class="fa fa-trash"></i> 删除
-                                        </a>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                <!-- 编辑记录表单 -->
+                <?php if ($editRecord): ?>
+                <div class="mb-4">
+                    <h3>编辑记录</h3>
+                    <form method="post">
+                        <input type="hidden" name="edit" value="1">
+                        <input type="hidden" name="id" value="<?php echo $editRecord['id']; ?>">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="date">日期</label>
+                                <input type="date" id="date" name="date" required value="<?php echo $editRecord['date']; ?>">
+                            </div>
+                            <div class="form-group">
+                                <label for="department">部门</label>
+                                <select id="department" name="department" required>
+                                    <?php foreach (DEPARTMENTS as $dept): ?>
+                                    <option value="<?php echo $dept; ?>" <?php echo $editRecord['department'] == $dept ? 'selected' : ''; ?>><?php echo $dept; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="name">姓名</label>
+                                <input type="text" id="name" name="name" required value="<?php echo $editRecord['name']; ?>" list="namesList">
+                                <datalist id="namesList">
+                                    <?php foreach ($allNames as $name): ?>
+                                    <option value="<?php echo $name; ?>"><?php echo $name; ?></option>
+                                    <?php endforeach; ?>
+                                </datalist>
+                            </div>
+                            <div class="form-group">
+                                <label for="quantity">创新数量</label>
+                                <input type="number" id="quantity" name="quantity" required min="1" value="<?php echo $editRecord['quantity']; ?>">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="content">创新内容</label>
+                            <textarea id="content" name="content" required><?php echo $editRecord['content']; ?></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="points">创新积分</label>
+                                <input type="number" id="points" name="points" required min="1" value="<?php echo $editRecord['points']; ?>">
+                            </div>
+                            <div class="form-group">
+                                <label for="implemented">是否落地实施</label>
+                                <input type="checkbox" id="implemented" name="implemented" value="1" <?php echo $editRecord['implemented'] ? 'checked' : ''; ?>>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="isAdditionalEdit" name="is_additional" value="1" <?php echo isset($editRecord['is_additional']) && $editRecord['is_additional'] ? 'checked' : ''; ?>>
+                                本月或之后追加积分（不计入创新数量）
+                            </label>
+                        </div>
+                        <div id="additionalPointsFieldsEdit" class="additional-field grid grid-cols-2 gap-4" <?php echo isset($editRecord['is_additional']) && $editRecord['is_additional'] ? '' : 'style="display: none;"'; ?>>
+                            <div class="form-group">
+                                <label for="month_for_points">积分计入月份</label>
+                                <select id="month_for_points" name="month_for_points" required>
+                                    <?php foreach ($monthOptions as $month): ?>
+                                    <option value="<?php echo $month; ?>" <?php echo isset($editRecord['month_for_points']) && $editRecord['month_for_points'] == $month ? 'selected' : ''; ?>><?php echo $month; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button type="submit" class="btn btn-primary">保存</button>
+                            <a href="index.php" class="btn btn-secondary">取消</a>
+                        </div>
+                    </form>
                 </div>
-            </div>
-        <?php else: ?>
-            <!-- 主内容区域 -->
-            <?php if (!isLoggedIn()): ?>
-                <div class="max-w-md mx-auto bg-white rounded-xl p-6 shadow-lg text-center">
-                    <div class="mb-4 text-4xl text-primary">
-                        <i class="fa fa-lock"></i>
-                    </div>
-                    <h2 class="text-xl font-bold mb-2 text-gray-800">请先登录</h2>
-                    <p class="text-gray-600 mb-4">您需要登录才能查看创新积分统计数据</p>
-                    <a href="?action=login" class="inline-block py-2 px-4 bg-primary text-white rounded-lg hover:bg-primary/90 transition">
-                        <i class="fa fa-sign-in mr-1"></i> 登录
-                    </a>
-                </div>
-            <?php else: ?>
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- 侧边栏 -->
-                    <div class="lg:col-span-1 space-y-6">
-                        <!-- 控制面板 -->
-                        <?php if (isAdmin()): ?>
-                        <div class="bg-white rounded-xl p-6 shadow-lg">
-                            <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                                <i class="fa fa-cog mr-2 text-primary"></i>
-                                控制面板
-                            </h2>
-                            <div class="space-y-3">
-                                <button id="showAddFormBtn" class="w-full py-2 px-4 bg-primary text-white rounded-lg hover:bg-primary/90 transition flex items-center justify-center">
-                                    <i class="fa fa-plus-circle mr-2"></i>
-                                    添加创新记录
-                                </button>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <a href="?view=weekly" class="py-2 px-3 bg-secondary text-white rounded-lg hover:bg-secondary/90 transition text-sm text-center">
-                                        <i class="fa fa-calendar mr-1"></i> 周统计
-                                    </a>
-                                    <a href="?view=monthly" class="py-2 px-3 bg-secondary text-white rounded-lg hover:bg-secondary/90 transition text-sm text-center">
-                                        <i class="fa fa-calendar mr-1"></i> 月统计
-                                    </a>
-                                    <a href="?view=quarterly" class="py-2 px-3 bg-secondary text-white rounded-lg hover:bg-secondary/90 transition text-sm text-center">
-                                        <i class="fa fa-calendar mr-1"></i> 季统计
-                                    </a>
-                                    <a href="?view=yearly" class="py-2 px-3 bg-secondary text-white rounded-lg hover:bg-secondary/90 transition text-sm text-center">
-                                        <i class="fa fa-calendar mr-1"></i> 年统计
-                                    </a>
-                                </div>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <a href="?view=department" class="py-2 px-3 bg-info text-white rounded-lg hover:bg-info/90 transition text-sm text-center">
-                                        <i class="fa fa-building mr-1"></i> 部门统计
-                                    </a>
-                                    <a href="?view=person" class="py-2 px-3 bg-info text-white rounded-lg hover:bg-info/90 transition text-sm text-center">
-                                        <i class="fa fa-user mr-1"></i> 个人统计
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endif; ?>
-
-                        <!-- 统计概览 -->
-                        <div class="bg-white rounded-xl p-6 shadow-lg">
-                            <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                                <i class="fa fa-bar-chart mr-2 text-primary"></i>
-                                统计概览
-                            </h2>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                                    <div class="text-blue-500 mb-1">
-                                        <i class="fa fa-list-alt text-xl"></i>
-                                    </div>
-                                    <div class="text-2xl font-bold"><?php echo count($data); ?></div>
-                                    <div class="text-sm text-gray-500">创新记录总数</div>
-                                </div>
-                                <div class="bg-green-50 p-4 rounded-lg border border-green-100">
-                                    <div class="text-green-500 mb-1">
-                                        <i class="fa fa-trophy text-xl"></i>
-                                    </div>
-                                    <div class="text-2xl font-bold"><?php echo array_sum(array_column($data, 'points')); ?></div>
-                                    <div class="text-sm text-gray-500">总创新积分</div>
-                                </div>
-                                <div class="bg-purple-50 p-4 rounded-lg border border-purple-100">
-                                    <div class="text-purple-500 mb-1">
-                                        <i class="fa fa-check-circle text-xl"></i>
-                                    </div>
-                                    <div class="text-2xl font-bold"><?php 
-                                        $implemented = array_filter($data, function($record) {
-                                            return $record['implemented'];
-                                        });
-                                        echo count($implemented);
-                                    ?></div>
-                                    <div class="text-sm text-gray-500">已实施数</div>
-                                </div>
-                                <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
-                                    <div class="text-yellow-500 mb-1">
-                                        <i class="fa fa-star text-xl"></i>
-                                    </div>
-                                    <div class="text-2xl font-bold"><?php 
-                                        $avgPoints = count($data) > 0 ? array_sum(array_column($data, 'points')) / count($data) : 0;
-                                        echo round($avgPoints, 1);
-                                    ?></div>
-                                    <div class="text-sm text-gray-500">平均积分</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- 排行统计 -->
-                        <div class="bg-white rounded-xl p-6 shadow-lg">
-                            <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                                <i class="fa fa-trophy mr-2 text-warning"></i>
-                                积分排行
-                            </h2>
-                            
-                            <h3 class="text-lg font-semibold mb-2 text-gray-700">本周排行</h3>
-                            <div class="space-y-2 mb-4">
-                                <?php foreach (array_slice($currentWeekRanking, 0, 3) as $index => $person): ?>
-                                <div class="flex items-center p-2 rounded-lg <?php echo $index == 0 ? 'bg-yellow-50' : ($index == 1 ? 'bg-gray-50' : 'bg-orange-50'); ?>">
-                                    <div class="w-6 h-6 rounded-full flex items-center justify-center bg-<?php echo $index == 0 ? 'yellow-100 text-yellow-700' : ($index == 1 ? 'gray-100 text-gray-700' : 'orange-100 text-orange-700'); ?> font-bold mr-2">
-                                        <?php echo $index + 1; ?>
-                                    </div>
-                                    <div class="flex-1">
-                                        <div class="font-medium"><?php echo $person['name'] ?> (<?php echo $person['department'] ?>)</div>
-                                        <div class="text-sm text-gray-500">积分: <?php echo $person['points'] ?></div>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                            
-                            <h3 class="text-lg font-semibold mb-2 text-gray-700">本月排行</h3>
-                            <div class="space-y-2">
-                                <?php foreach (array_slice($currentMonthRanking, 0, 3) as $index => $person): ?>
-                                <div class="flex items-center p-2 rounded-lg <?php echo $index == 0 ? 'bg-yellow-50' : ($index == 1 ? 'bg-gray-50' : 'bg-orange-50'); ?>">
-                                    <div class="w-6 h-6 rounded-full flex items-center justify-center bg-<?php echo $index == 0 ? 'yellow-100 text-yellow-700' : ($index == 1 ? 'gray-100 text-gray-700' : 'orange-100 text-orange-700'); ?> font-bold mr-2">
-                                        <?php echo $index + 1; ?>
-                                    </div>
-                                    <div class="flex-1">
-                                        <div class="font-medium"><?php echo $person['name'] ?> (<?php echo $person['department'] ?>)</div>
-                                        <div class="text-sm text-gray-500">积分: <?php echo $person['points'] ?></div>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 主内容区 -->
-                    <div class="lg:col-span-2 space-y-6">
-                        <!-- 添加记录表单 -->
-                        <?php if (isAdmin()): ?>
-                        <div id="addRecordForm" class="bg-white rounded-xl p-6 shadow-lg <?php echo isset($_GET['action']) && $_GET['action'] == 'add' ? '' : 'hidden'; ?>">
-                            <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                                <i class="fa fa-plus-circle mr-2 text-success"></i>
-                                添加创新记录
-                            </h2>
-                            <form action="index.php" method="post" class="space-y-4">
-                                <input type="hidden" name="action" value="add">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label for="department" class="block text-sm font-medium text-gray-700 mb-1">部门</label>
-                                        <select id="department" name="department" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                            <option value="">请选择部门</option>
-                                            <?php foreach ($departments as $dept): ?>
-                                            <option value="<?php echo $dept; ?>"><?php echo $dept; ?></option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label for="name" class="block text-sm font-medium text-gray-700 mb-1">姓名</label>
-                                        <input type="text" id="name" name="name" required list="namesList"
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                        <datalist id="namesList">
-                                            <?php foreach ($uniqueNames as $name): ?>
-                                            <option value="<?php echo $name; ?>"><?php echo $name; ?></option>
-                                            <?php endforeach; ?>
-                                        </datalist>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label for="content" class="block text-sm font-medium text-gray-700 mb-1">创新内容</label>
-                                    <textarea id="content" name="content" rows="3" required
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition"></textarea>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <label for="quantity" class="block text-sm font-medium text-gray-700 mb-1">创新数量</label>
-                                        <input type="number" id="quantity" name="quantity" min="1" value="1" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                    </div>
-                                    <div>
-                                        <label for="points" class="block text-sm font-medium text-gray-700 mb-1">创新积分</label>
-                                        <input type="number" id="points" name="points" min="1" value="1" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                    </div>
-                                    <div class="flex items-end">
-                                        <label for="implemented" class="flex items-center">
-                                            <input type="checkbox" id="implemented" name="implemented" class="mr-2 h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
-                                            已落地实施
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="flex justify-end space-x-3">
-                                    <a href="index.php" class="py-2 px-4 border border-gray-300 rounded-lg hover:bg-gray-100 transition">
-                                        取消
-                                    </a>
-                                    <button type="submit" class="py-2 px-4 bg-success text-white rounded-lg hover:bg-success/90 transition">
-                                        <i class="fa fa-save mr-1"></i> 保存记录
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                        
-                        <!-- 编辑记录表单 -->
-                        <div id="editRecordForm" class="bg-white rounded-xl p-6 shadow-lg <?php echo isset($editRecord) ? '' : 'hidden'; ?>">
-                            <h2 class="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                                <i class="fa fa-pencil mr-2 text-primary"></i>
-                                编辑创新记录
-                            </h2>
-                            <form action="index.php" method="post" class="space-y-4">
-                                <input type="hidden" name="action" value="update">
-                                <input type="hidden" name="id" value="<?php echo $editRecord['id']; ?>">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label for="department" class="block text-sm font-medium text-gray-700 mb-1">部门</label>
-                                        <select id="department" name="department" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                            <?php foreach ($departments as $dept): ?>
-                                            <option value="<?php echo $dept; ?>" <?php echo $editRecord['department'] == $dept ? 'selected' : ''; ?>><?php echo $dept; ?></option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label for="name" class="block text-sm font-medium text-gray-700 mb-1">姓名</label>
-                                        <input type="text" id="name" name="name" required list="namesList" value="<?php echo htmlspecialchars($editRecord['name']); ?>"
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                        <datalist id="namesList">
-                                            <?php foreach ($uniqueNames as $name): ?>
-                                            <option value="<?php echo $name; ?>"><?php echo $name; ?></option>
-                                            <?php endforeach; ?>
-                                        </datalist>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label for="content" class="block text-sm font-medium text-gray-700 mb-1">创新内容</label>
-                                    <textarea id="content" name="content" rows="3" required
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition"><?php echo htmlspecialchars($editRecord['content']); ?></textarea>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <label for="quantity" class="block text-sm font-medium text-gray-700 mb-1">创新数量</label>
-                                        <input type="number" id="quantity" name="quantity" min="1" value="<?php echo $editRecord['quantity']; ?>" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                    </div>
-                                    <div>
-                                        <label for="points" class="block text-sm font-medium text-gray-700 mb-1">创新积分</label>
-                                        <input type="number" id="points" name="points" min="1" value="<?php echo $editRecord['points']; ?>" required
-                                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                    </div>
-                                    <div class="flex items-end">
-                                        <label for="implemented" class="flex items-center">
-                                            <input type="checkbox" id="implemented" name="implemented" class="mr-2 h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded" <?php echo $editRecord['implemented'] ? 'checked' : ''; ?>>
-                                            已落地实施
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="flex justify-end space-x-3">
-                                    <a href="index.php" class="py-2 px-4 border border-gray-300 rounded-lg hover:bg-gray-100 transition">
-                                        取消
-                                    </a>
-                                    <button type="submit" class="py-2 px-4 bg-primary text-white rounded-lg hover:bg-primary/90 transition">
-                                        <i class="fa fa-save mr-1"></i> 更新记录
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                        <?php endif; ?>
-
-                        <!-- 数据展示区域 -->
-                        <div id="dataDisplay" class="bg-white rounded-xl p-6 shadow-lg">
-                            <div class="flex justify-between items-center mb-4">
-                                <h2 id="displayTitle" class="text-xl font-bold text-gray-800 flex items-center">
-                                    <i class="fa fa-table mr-2 text-primary"></i>
-                                    <?php 
-                                    switch ($view) {
-                                        case 'weekly': echo '周统计数据'; break;
-                                        case 'monthly': echo '月统计数据'; break;
-                                        case 'quarterly': echo '季度统计数据'; break;
-                                        case 'yearly': echo '年统计数据'; break;
-                                        case 'department': echo '部门统计数据'; break;
-                                        case 'person': echo '个人统计数据'; break;
-                                        default: echo '所有记录'; break;
-                                    }
-                                    ?>
-                                </h2>
-                                <?php if (isAdmin()): ?>
-                                <div>
-                                    <a href="?action=add" class="py-2 px-4 bg-success text-white rounded-lg hover:bg-success/90 transition text-sm">
-                                        <i class="fa fa-plus-circle mr-1"></i> 添加记录
-                                    </a>
-                                </div>
+                <?php endif; ?>
+                
+                <!-- 数据表格 -->
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>部门</th>
+                            <th>姓名</th>
+                            <th>创新内容</th>
+                            <th>创新数量</th>
+                            <th>创新积分</th>
+                            <th>是否实施</th>
+                            <th>类型</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($data as $record): ?>
+                        <tr>
+                            <td><?php echo $record['date']; ?></td>
+                            <td><?php echo $record['department']; ?></td>
+                            <td><?php echo $record['name']; ?></td>
+                            <td><?php echo mb_strimwidth($record['content'], 0, 50, '...'); ?></td>
+                            <td><?php echo $record['quantity']; ?></td>
+                            <td><?php echo $record['points']; ?></td>
+                            <td>
+                                <span class="implemented-badge <?php echo $record['implemented'] ? 'implemented-yes' : 'implemented-no'; ?>">
+                                    <?php echo $record['implemented'] ? '是' : '否'; ?>
+                                </span>
+                            </td>
+                            <td>
+                                <?php if (isset($record['is_additional']) && $record['is_additional']): ?>
+                                <span class="additional-badge">追加积分</span>
+                                <div class="text-xs text-gray-500">计入: <?php echo $record['month_for_points']; ?></div>
                                 <?php endif; ?>
-                            </div>
-
-                            <!-- 统计数据显示 -->
-                            <?php if ($view == 'weekly' || $view == 'monthly' || $view == 'quarterly' || $view == 'yearly'): ?>
-                                <div class="overflow-x-auto mb-6">
-                                    <table class="min-w-full divide-y divide-gray-200">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    <?php echo $view == 'weekly' ? '周' : ($view == 'monthly' ? '月' : ($view == 'quarterly' ? '季度' : '年')); ?>
-                                                </th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新记录数</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新数量</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新积分</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">已实施数</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="bg-white divide-y divide-gray-200">
-                                            <?php
-                                            $stats = [];
-                                            switch ($view) {
-                                                case 'weekly': $stats = getWeeklyStats($data); break;
-                                                case 'monthly': $stats = getMonthlyStats($data); break;
-                                                case 'quarterly': $stats = getQuarterlyStats($data); break;
-                                                case 'yearly': $stats = getYearlyStats($data); break;
-                                            }
-                                            
-                                            // 按时间排序
-                                            if ($view == 'weekly' || $view == 'monthly' || $view == 'quarterly') {
-                                                ksort($stats);
-                                            } else {
-                                                krsort($stats); // 年份倒序
-                                            }
-                                            
-                                            foreach ($stats as $period => $stat):
-                                            ?>
-                                            <tr class="hover:bg-gray-50 transition">
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $period; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['records']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['quantity']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['points']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                                        <?php echo $stat['implemented']; ?>
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php elseif ($view == 'department'): ?>
-                                <div class="overflow-x-auto mb-6">
-                                    <table class="min-w-full divide-y divide-gray-200">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新记录数</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新数量</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新积分</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">已实施数</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="bg-white divide-y divide-gray-200">
-                                            <?php
-                                            $deptStats = getDepartmentStats($data);
-                                            
-                                            // 按积分排序
-                                            uasort($deptStats, function($a, $b) {
-                                                return $b['points'] - $a['points'];
-                                            });
-                                            
-                                            foreach ($deptStats as $dept => $stat):
-                                            ?>
-                                            <tr class="hover:bg-gray-50 transition">
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $dept; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['records']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['quantity']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['points']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                                        <?php echo $stat['implemented']; ?>
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php elseif ($view == 'person'): ?>
-                                <div class="overflow-x-auto mb-6">
-                                    <table class="min-w-full divide-y divide-gray-200">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门-姓名</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新记录数</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新数量</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新积分</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">已实施数</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="bg-white divide-y divide-gray-200">
-                                            <?php
-                                            $personStats = getPersonStats($data);
-                                            
-                                            // 按积分排序
-                                            uasort($personStats, function($a, $b) {
-                                                return $b['points'] - $a['points'];
-                                            });
-                                            
-                                            foreach ($personStats as $key => $stat):
-                                            ?>
-                                            <tr class="hover:bg-gray-50 transition">
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['name'] ?> (<?php echo $stat['department'] ?>)</td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['records']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['quantity']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap"><?php echo $stat['points']; ?></td>
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                                        <?php echo $stat['implemented']; ?>
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php else: ?>
-                                <!-- 表格区域 -->
-                                <div class="overflow-x-auto">
-                                    <table class="min-w-full divide-y divide-gray-200">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">姓名</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创新内容</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">积分</th>
-                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">实施状态</th>
-                                                <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="bg-white divide-y divide-gray-200">
-                                            <?php
-                                            if (empty($data)) {
-                                                echo '<tr><td colspan="8" class="px-6 py-10 text-center text-gray-500">暂无记录</td></tr>';
-                                            } else {
-                                                // 按日期倒序排列
-                                                usort($data, function($a, $b) {
-                                                    return strtotime($b['date']) - strtotime($a['date']);
-                                                });
-                                                
-                                                foreach ($data as $record) {
-                                                    echo '<tr class="hover:bg-gray-50 transition">';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">'.$record['date'].'</td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">'.$record['department'].'</td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">'.$record['name'].'</td>';
-                                                    echo '<td class="px-6 py-4"><div class="truncate max-w-xs">'.htmlspecialchars($record['content']).'</div></td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">'.$record['quantity'].'</td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">'.$record['points'].'</td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap">';
-                                                    echo '<span class="px-2 py-1 text-xs font-semibold rounded-full '.($record['implemented'] ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800').'">';
-                                                    echo $record['implemented'] ? '已实施' : '未实施';
-                                                    echo '</span></td>';
-                                                    echo '<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">';
-                                                    if (isAdmin()) {
-                                                        echo '<a href="?action=edit&id='.$record['id'].'" class="text-primary hover:text-primary/80 mr-3">';
-                                                        echo '<i class="fa fa-pencil"></i> 编辑';
-                                                        echo '</a>';
-                                                        echo '<a href="?action=delete&id='.$record['id'].'" class="text-danger hover:text-danger/80" onclick="return confirm(\'确定要删除这条记录吗？\')">';
-                                                        echo '<i class="fa fa-trash"></i> 删除';
-                                                        echo '</a>';
-                                                    } else {
-                                                        echo '<span class="text-gray-400">无权限操作</span>';
-                                                    }
-                                                    echo '</td>';
-                                                    echo '</tr>';
-                                                }
-                                            }
-                                            ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php endif; ?>
+                            </td>
+                            <td>
+                                <a href="?edit=<?php echo $record['id']; ?>" class="btn btn-primary">编辑</a>
+                                <a href="?delete=<?php echo $record['id']; ?>" class="btn btn-danger" onclick="return confirm('确定要删除这条记录吗？')">删除</a>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php elseif ($view == 'person' || $view == 'department' || $view == 'company'): ?>
+            <!-- 统计视图 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>
+                        <?php 
+                        if ($view == 'person') echo '个人排行榜';
+                        elseif ($view == 'department') echo '部门排行榜';
+                        else echo '公司统计';
+                        ?>
+                    </h2>
+                </div>
+                
+                <div class="period-tabs">
+                    <a href="?view=<?php echo $view; ?>&period=week" class="<?php echo $period == 'week' ? 'active' : ''; ?>">周统计</a>
+                    <a href="?view=<?php echo $view; ?>&period=month" class="<?php echo $period == 'month' ? 'active' : ''; ?>">月统计</a>
+                    <a href="?view=<?php echo $view; ?>&period=quarter" class="<?php echo $period == 'quarter' ? 'active' : ''; ?>">季度统计</a>
+                </div>
+                
+                <?php if ($view == 'person'): ?>
+                <!-- 个人排行榜 -->
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>部门</th>
+                            <th>姓名</th>
+                            <th>创新数量</th>
+                            <th>创新积分</th>
+                            <th>落地实施数量</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $ranking = getPersonRanking($data, $period);
+                        foreach ($ranking as $index => $item): 
+                        ?>
+                        <tr>
+                            <td>
+                                <span class="ranking-badge <?php echo $index < 3 ? 'ranking-' . ($index + 1) : ''; ?>">
+                                    <?php echo $index + 1; ?>
+                                </span>
+                            </td>
+                            <td><?php echo $item['department']; ?></td>
+                            <td><?php echo $item['name']; ?></td>
+                            <td><?php echo $item['quantity']; ?></td>
+                            <td><?php echo $item['points']; ?></td>
+                            <td><?php echo $item['implemented']; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php elseif ($view == 'department'): ?>
+                <!-- 部门排行榜 -->
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>部门</th>
+                            <th>创新数量</th>
+                            <th>创新积分</th>
+                            <th>落地实施数量</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $ranking = getDepartmentRanking($data, $period);
+                        foreach ($ranking as $index => $item): 
+                        ?>
+                        <tr>
+                            <td>
+                                <span class="ranking-badge <?php echo $index < 3 ? 'ranking-' . ($index + 1) : ''; ?>">
+                                    <?php echo $index + 1; ?>
+                                </span>
+                            </td>
+                            <td><?php echo $item['department']; ?></td>
+                            <td><?php echo $item['quantity']; ?></td>
+                            <td><?php echo $item['points']; ?></td>
+                            <td><?php echo $item['implemented']; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php elseif ($view == 'company'): ?>
+                <!-- 公司统计 -->
+                <div class="bg-light p-4 rounded">
+                    <h3>公司<?php echo $period == 'week' ? '周' : ($period == 'month' ? '月' : '季度'); ?>统计</h3>
+                    <div class="grid grid-cols-3 gap-4 mt-3">
+                        <div class="bg-white p-3 rounded shadow-sm">
+                            <div class="text-sm text-gray-500">总创新数量</div>
+                            <div class="text-2xl font-bold"><?php echo getCompanyRanking($data, $period)['quantity']; ?></div>
+                        </div>
+                        <div class="bg-white p-3 rounded shadow-sm">
+                            <div class="text-sm text-gray-500">总创新积分</div>
+                            <div class="text-2xl font-bold"><?php echo getCompanyRanking($data, $period)['points']; ?></div>
+                        </div>
+                        <div class="bg-white p-3 rounded shadow-sm">
+                            <div class="text-sm text-gray-500">落地实施数量</div>
+                            <div class="text-2xl font-bold"><?php echo getCompanyRanking($data, $period)['implemented']; ?></div>
                         </div>
                     </div>
                 </div>
-            <?php endif; ?>
-        <?php endif; ?>
-    </main>
-
-    <footer class="bg-gray-800 text-white py-8 mt-12">
-        <div class="container mx-auto px-4">
-            <div class="flex flex-col md:flex-row justify-between items-center">
-                <div class="mb-4 md:mb-0">
-                    <h2 class="text-xl font-bold flex items-center">
-                        <i class="fa fa-line-chart mr-2"></i>
-                        创新积分统计系统
-                    </h2>
-                    <p class="text-gray-400 mt-1">高效跟踪和分析团队创新成果</p>
-                </div>
-                <div class="text-gray-400 text-sm">
-                    &copy; 2025 创新积分统计系统 | 设计与开发
-                </div>
+                <?php endif; ?>
             </div>
+            <?php endif; ?>
+            <?php endif; ?>
         </div>
-    </footer>
+    </div>
 
     <script>
         // 显示添加表单
         document.getElementById('showAddFormBtn').addEventListener('click', function() {
-            document.getElementById('addRecordForm').classList.remove('hidden');
+            document.getElementById('addRecordForm').style.display = 'block';
         });
         
-        // 显示添加用户表单
-        document.getElementById('showAddUserFormBtn').addEventListener('click', function() {
-            document.getElementById('addUserForm').classList.remove('hidden');
+        // 控制追加积分字段显示
+        document.getElementById('isAdditional').addEventListener('change', function() {
+            const additionalFields = document.getElementById('additionalPointsFields');
+            if (this.checked) {
+                additionalFields.style.display = 'grid';
+            } else {
+                additionalFields.style.display = 'none';
+            }
         });
         
-        // 取消添加用户
-        document.getElementById('cancelAddUserBtn').addEventListener('click', function() {
-            document.getElementById('addUserForm').classList.add('hidden');
+        document.getElementById('isAdditionalEdit').addEventListener('change', function() {
+            const additionalFields = document.getElementById('additionalPointsFieldsEdit');
+            if (this.checked) {
+                additionalFields.style.display = 'grid';
+            } else {
+                additionalFields.style.display = 'none';
+            }
         });
     </script>
 </body>
-</html>    
+</html>
