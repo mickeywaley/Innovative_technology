@@ -1,2 +1,3 @@
 # Innovative_technology
-创新激活管理系统
+
+创新积分管理系统
