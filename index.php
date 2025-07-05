@@ -56,7 +56,7 @@ $users = loadData(USERS_FILE);
 // 获取所有已输入过的姓名
 $allNames = array_unique(array_column($data, 'name'));
 
-// 处理数据操作
+// 处理数据操作 - 仅管理员可访问
 if (isAdmin()) {
     // 添加记录
     if (isset($_POST['add'])) {
@@ -136,7 +136,7 @@ function getPeriodData($data, $period, $forPoints = false) {
     return array_filter($data, function($record) use ($startDate, $endDate, $period, $forPoints) {
         if ($forPoints && $record['is_additional']) {
             // 追加积分的记录，使用month_for_points字段
-            $recordMonth = date('Y-m', strtotime($record['date']));
+            $recordMonth = $record['month_for_points'];
             $targetMonth = date('Y-m', strtotime($startDate));
             return $recordMonth >= $targetMonth;
         } else {
@@ -233,7 +233,7 @@ $editId = isset($_GET['edit']) ? $_GET['edit'] : null;
 
 // 获取编辑记录
 $editRecord = null;
-if ($editId) {
+if ($editId && isAdmin()) {
     foreach ($data as $record) {
         if ($record['id'] === $editId) {
             $editRecord = $record;
@@ -277,6 +277,7 @@ for ($i = 0; $i < 12; $i++) {
         .btn-primary { background-color: #007BFF; color: white; }
         .btn-danger { background-color: #DC3545; color: white; }
         .btn-secondary { background-color: #6C757D; color: white; }
+        .btn-login { background-color: #28a745; color: white; }
         .table { width: 100%; border-collapse: collapse; }
         .table th, .table td { padding: 10px; border: 1px solid #ddd; text-align: left; }
         .table th { background-color: #f2f2f2; }
@@ -299,6 +300,7 @@ for ($i = 0; $i < 12; $i++) {
         .ranking-3 { background-color: #fd7e14; color: white; }
         .additional-field { display: none; }
         .additional-badge { background-color: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .admin-panel { background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
@@ -310,6 +312,8 @@ for ($i = 0; $i < 12; $i++) {
                 <ul>
                     <li><a href="?logout">退出登录</a></li>
                 </ul>
+                <?php else: ?>
+                <button id="loginBtn" class="btn btn-login">管理员登录</button>
                 <?php endif; ?>
             </div>
         </div>
@@ -317,9 +321,8 @@ for ($i = 0; $i < 12; $i++) {
 
     <div class="content">
         <div class="container">
-            <?php if (!isAdmin()): ?>
             <!-- 登录表单 -->
-            <div class="card">
+            <div id="loginForm" class="card" style="display: none;">
                 <div class="card-header">
                     <h2>管理员登录</h2>
                 </div>
@@ -339,7 +342,7 @@ for ($i = 0; $i < 12; $i++) {
                     <button type="submit" class="btn btn-primary">登录</button>
                 </form>
             </div>
-            <?php else: ?>
+
             <!-- 管理界面 -->
             <div class="tabs">
                 <ul>
@@ -356,11 +359,14 @@ for ($i = 0; $i < 12; $i++) {
                 <div class="card-header">
                     <div class="flex justify-between items-center">
                         <h2>创新积分记录</h2>
+                        <?php if (isAdmin()): ?>
                         <button id="showAddFormBtn" class="btn btn-primary">添加记录</button>
+                        <?php endif; ?>
                     </div>
                 </div>
                 
-                <!-- 添加记录表单 -->
+                <!-- 添加记录表单 - 仅管理员可见 -->
+                <?php if (isAdmin()): ?>
                 <div id="addRecordForm" class="mb-4" style="display: none;">
                     <form method="post">
                         <input type="hidden" name="add" value="1">
@@ -424,9 +430,10 @@ for ($i = 0; $i < 12; $i++) {
                         <button type="submit" class="btn btn-primary">保存</button>
                     </form>
                 </div>
+                <?php endif; ?>
                 
-                <!-- 编辑记录表单 -->
-                <?php if ($editRecord): ?>
+                <!-- 编辑记录表单 - 仅管理员可见 -->
+                <?php if ($editRecord && isAdmin()): ?>
                 <div class="mb-4">
                     <h3>编辑记录</h3>
                     <form method="post">
@@ -533,8 +540,12 @@ for ($i = 0; $i < 12; $i++) {
                                 <?php endif; ?>
                             </td>
                             <td>
+                                <?php if (isAdmin()): ?>
                                 <a href="?edit=<?php echo $record['id']; ?>" class="btn btn-primary">编辑</a>
                                 <a href="?delete=<?php echo $record['id']; ?>" class="btn btn-danger" onclick="return confirm('确定要删除这条记录吗？')">删除</a>
+                                <?php else: ?>
+                                <span class="text-gray-500">仅管理员可操作</span>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -646,32 +657,61 @@ for ($i = 0; $i < 12; $i++) {
                 <?php endif; ?>
             </div>
             <?php endif; ?>
-            <?php endif; ?>
         </div>
     </div>
 
     <script>
-        // 显示添加表单
-        document.getElementById('showAddFormBtn').addEventListener('click', function() {
-            document.getElementById('addRecordForm').style.display = 'block';
-        });
-        
-        // 控制追加积分字段显示
-        document.getElementById('isAdditional').addEventListener('change', function() {
-            const additionalFields = document.getElementById('additionalPointsFields');
-            if (this.checked) {
-                additionalFields.style.display = 'grid';
-            } else {
-                additionalFields.style.display = 'none';
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 显示登录表单
+            const loginBtn = document.getElementById('loginBtn');
+            if (loginBtn) {
+                loginBtn.addEventListener('click', function() {
+                    const loginForm = document.getElementById('loginForm');
+                    if (loginForm) {
+                        loginForm.style.display = 'block';
+                    }
+                });
             }
-        });
-        
-        document.getElementById('isAdditionalEdit').addEventListener('change', function() {
-            const additionalFields = document.getElementById('additionalPointsFieldsEdit');
-            if (this.checked) {
-                additionalFields.style.display = 'grid';
-            } else {
-                additionalFields.style.display = 'none';
+            
+            // 显示添加表单
+            const showAddFormBtn = document.getElementById('showAddFormBtn');
+            if (showAddFormBtn) {
+                showAddFormBtn.addEventListener('click', function() {
+                    const addRecordForm = document.getElementById('addRecordForm');
+                    if (addRecordForm) {
+                        addRecordForm.style.display = 'block';
+                    }
+                });
+            }
+            
+            // 控制追加积分字段显示
+            const isAdditional = document.getElementById('isAdditional');
+            if (isAdditional) {
+                isAdditional.addEventListener('change', function() {
+                    const additionalFields = document.getElementById('additionalPointsFields');
+                    if (additionalFields) {
+                        if (this.checked) {
+                            additionalFields.style.display = 'grid';
+                        } else {
+                            additionalFields.style.display = 'none';
+                        }
+                    }
+                });
+            }
+            
+            const isAdditionalEdit = document.getElementById('isAdditionalEdit');
+            if (isAdditionalEdit) {
+                isAdditionalEdit.addEventListener('change', function() {
+                    const additionalFields = document.getElementById('additionalPointsFieldsEdit');
+                    if (additionalFields) {
+                        if (this.checked) {
+                            additionalFields.style.display = 'grid';
+                        } else {
+                            additionalFields.style.display = 'none';
+                        }
+                    }
+                });
             }
         });
     </script>
