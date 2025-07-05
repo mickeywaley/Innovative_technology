@@ -68,7 +68,9 @@ if (isAdmin()) {
             'content' => $_POST['content'],
             'quantity' => (int)$_POST['quantity'],
             'points' => (int)$_POST['points'],
-            'implemented' => isset($_POST['implemented']) ? true : false
+            'implemented' => isset($_POST['implemented']) ? true : false,
+            'is_additional' => isset($_POST['is_additional']) ? true : false,
+            'month_for_points' => $_POST['month_for_points'] ?? date('Y-m', strtotime($_POST['date']))
         ];
         
         $data[] = $newRecord;
@@ -88,6 +90,8 @@ if (isAdmin()) {
                 $record['quantity'] = (int)$_POST['quantity'];
                 $record['points'] = (int)$_POST['points'];
                 $record['implemented'] = isset($_POST['implemented']) ? true : false;
+                $record['is_additional'] = isset($_POST['is_additional']) ? true : false;
+                $record['month_for_points'] = $_POST['month_for_points'];
                 break;
             }
         }
@@ -108,7 +112,7 @@ if (isAdmin()) {
 }
 
 // 统计函数
-function getPeriodData($data, $period) {
+function getPeriodData($data, $period, $forPoints = false) {
     $today = new DateTime();
     $startDate = null;
     $endDate = $today->format('Y-m-d');
@@ -129,13 +133,21 @@ function getPeriodData($data, $period) {
             return $data;
     }
     
-    return array_filter($data, function($record) use ($startDate, $endDate) {
-        return $record['date'] >= $startDate && $record['date'] <= $endDate;
+    return array_filter($data, function($record) use ($startDate, $endDate, $period, $forPoints) {
+        if ($forPoints && $record['is_additional']) {
+            // 追加积分的记录，使用month_for_points字段
+            $recordMonth = date('Y-m', strtotime($record['date']));
+            $targetMonth = date('Y-m', strtotime($startDate));
+            return $recordMonth >= $targetMonth;
+        } else {
+            // 普通记录使用日期范围
+            return $record['date'] >= $startDate && $record['date'] <= $endDate;
+        }
     });
 }
 
 function getPersonRanking($data, $period) {
-    $periodData = getPeriodData($data, $period);
+    $periodData = getPeriodData($data, $period, true);
     $ranking = [];
     
     foreach ($periodData as $record) {
@@ -152,7 +164,9 @@ function getPersonRanking($data, $period) {
         }
         
         $ranking[$key]['points'] += $record['points'];
-        $ranking[$key]['quantity'] += $record['quantity'];
+        if (!$record['is_additional']) {
+            $ranking[$key]['quantity'] += $record['quantity'];
+        }
         $ranking[$key]['implemented'] += $record['implemented'] ? 1 : 0;
     }
     
@@ -164,7 +178,7 @@ function getPersonRanking($data, $period) {
 }
 
 function getDepartmentRanking($data, $period) {
-    $periodData = getPeriodData($data, $period);
+    $periodData = getPeriodData($data, $period, true);
     $ranking = [];
     
     foreach ($periodData as $record) {
@@ -180,7 +194,9 @@ function getDepartmentRanking($data, $period) {
         }
         
         $ranking[$department]['points'] += $record['points'];
-        $ranking[$department]['quantity'] += $record['quantity'];
+        if (!$record['is_additional']) {
+            $ranking[$department]['quantity'] += $record['quantity'];
+        }
         $ranking[$department]['implemented'] += $record['implemented'] ? 1 : 0;
     }
     
@@ -192,7 +208,7 @@ function getDepartmentRanking($data, $period) {
 }
 
 function getCompanyRanking($data, $period) {
-    $periodData = getPeriodData($data, $period);
+    $periodData = getPeriodData($data, $period, true);
     $ranking = [
         'points' => 0,
         'quantity' => 0,
@@ -201,7 +217,9 @@ function getCompanyRanking($data, $period) {
     
     foreach ($periodData as $record) {
         $ranking['points'] += $record['points'];
-        $ranking['quantity'] += $record['quantity'];
+        if (!$record['is_additional']) {
+            $ranking['quantity'] += $record['quantity'];
+        }
         $ranking['implemented'] += $record['implemented'] ? 1 : 0;
     }
     
@@ -222,6 +240,14 @@ if ($editId) {
             break;
         }
     }
+}
+
+// 生成月份选择列表
+$monthOptions = [];
+$currentMonth = date('Y-m');
+for ($i = 0; $i < 12; $i++) {
+    $month = date('Y-m', strtotime("-$i months"));
+    $monthOptions[] = $month;
 }
 ?>
 
@@ -271,6 +297,8 @@ if ($editId) {
         .ranking-1 { background-color: #ffc107; color: #333; }
         .ranking-2 { background-color: #6c757d; color: white; }
         .ranking-3 { background-color: #fd7e14; color: white; }
+        .additional-field { display: none; }
+        .additional-badge { background-color: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -377,6 +405,22 @@ if ($editId) {
                                 <input type="checkbox" id="implemented" name="implemented" value="1">
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="isAdditional" name="is_additional" value="1">
+                                本月或之后追加积分（不计入创新数量）
+                            </label>
+                        </div>
+                        <div id="additionalPointsFields" class="additional-field grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label for="month_for_points">积分计入月份</label>
+                                <select id="month_for_points" name="month_for_points" required>
+                                    <?php foreach ($monthOptions as $month): ?>
+                                    <option value="<?php echo $month; ?>" <?php echo $month == date('Y-m') ? 'selected' : ''; ?>><?php echo $month; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
                         <button type="submit" class="btn btn-primary">保存</button>
                     </form>
                 </div>
@@ -429,6 +473,22 @@ if ($editId) {
                                 <input type="checkbox" id="implemented" name="implemented" value="1" <?php echo $editRecord['implemented'] ? 'checked' : ''; ?>>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="isAdditionalEdit" name="is_additional" value="1" <?php echo isset($editRecord['is_additional']) && $editRecord['is_additional'] ? 'checked' : ''; ?>>
+                                本月或之后追加积分（不计入创新数量）
+                            </label>
+                        </div>
+                        <div id="additionalPointsFieldsEdit" class="additional-field grid grid-cols-2 gap-4" <?php echo isset($editRecord['is_additional']) && $editRecord['is_additional'] ? '' : 'style="display: none;"'; ?>>
+                            <div class="form-group">
+                                <label for="month_for_points">积分计入月份</label>
+                                <select id="month_for_points" name="month_for_points" required>
+                                    <?php foreach ($monthOptions as $month): ?>
+                                    <option value="<?php echo $month; ?>" <?php echo isset($editRecord['month_for_points']) && $editRecord['month_for_points'] == $month ? 'selected' : ''; ?>><?php echo $month; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
                         <div class="flex space-x-2">
                             <button type="submit" class="btn btn-primary">保存</button>
                             <a href="index.php" class="btn btn-secondary">取消</a>
@@ -448,6 +508,7 @@ if ($editId) {
                             <th>创新数量</th>
                             <th>创新积分</th>
                             <th>是否实施</th>
+                            <th>类型</th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -464,6 +525,12 @@ if ($editId) {
                                 <span class="implemented-badge <?php echo $record['implemented'] ? 'implemented-yes' : 'implemented-no'; ?>">
                                     <?php echo $record['implemented'] ? '是' : '否'; ?>
                                 </span>
+                            </td>
+                            <td>
+                                <?php if (isset($record['is_additional']) && $record['is_additional']): ?>
+                                <span class="additional-badge">追加积分</span>
+                                <div class="text-xs text-gray-500">计入: <?php echo $record['month_for_points']; ?></div>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <a href="?edit=<?php echo $record['id']; ?>" class="btn btn-primary">编辑</a>
@@ -587,6 +654,25 @@ if ($editId) {
         // 显示添加表单
         document.getElementById('showAddFormBtn').addEventListener('click', function() {
             document.getElementById('addRecordForm').style.display = 'block';
+        });
+        
+        // 控制追加积分字段显示
+        document.getElementById('isAdditional').addEventListener('change', function() {
+            const additionalFields = document.getElementById('additionalPointsFields');
+            if (this.checked) {
+                additionalFields.style.display = 'grid';
+            } else {
+                additionalFields.style.display = 'none';
+            }
+        });
+        
+        document.getElementById('isAdditionalEdit').addEventListener('change', function() {
+            const additionalFields = document.getElementById('additionalPointsFieldsEdit');
+            if (this.checked) {
+                additionalFields.style.display = 'grid';
+            } else {
+                additionalFields.style.display = 'none';
+            }
         });
     </script>
 </body>
